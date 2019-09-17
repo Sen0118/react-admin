@@ -107,8 +107,7 @@ const useMutation = (
                 ? dataProviderWithDeclarativeSideEffects
                 : dataProvider;
 
-            dataProviderWithSideEffects(
-                type,
+            dataProviderWithSideEffects[type](
                 resource,
                 merge({}, payload, callTimePayload),
                 merge({}, options, callTimeOptions)

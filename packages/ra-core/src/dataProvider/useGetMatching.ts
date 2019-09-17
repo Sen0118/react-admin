@@ -1,7 +1,6 @@
 import { useSelector } from 'react-redux';
 import { CRUD_GET_MATCHING } from '../actions/dataActions/crudGetMatching';
-import { GET_LIST } from '../dataFetchActions';
-import { Pagination, Sort, ReduxState } from '../types';
+import { Pagination, Sort, ReduxState, Record } from '../types';
 import useQueryWithStore from './useQueryWithStore';
 import {
     getReferenceResource,
@@ -53,11 +52,14 @@ const referenceSource = (resource, source) => `${resource}@${source}`;
  *     )}</ul>;
  * };
  */
-const useGetMatching = (
+const useGetMatching = <
+    RecordType extends Record = Record,
+    FilterType = object
+>(
     resource: string,
     pagination: Pagination,
     sort: Sort,
-    filter: object,
+    filter: FilterType,
     source: string,
     referencingResource: string,
     options?: any
@@ -69,17 +71,9 @@ const useGetMatching = (
         error,
         loading,
         loaded,
-    } = useQueryWithStore(
-        {
-            type: GET_LIST,
-            resource,
-            payload: { pagination, sort, filter },
-        },
-        {
-            ...options,
-            relatedTo,
-            action: CRUD_GET_MATCHING,
-        },
+    } = useQueryWithStore().getList<RecordType, FilterType>(
+        resource,
+        { pagination, sort, filter },
         (state: ReduxState) =>
             getPossibleReferenceValues(state, {
                 referenceSource,
@@ -89,7 +83,12 @@ const useGetMatching = (
         (state: ReduxState) =>
             state.admin.resources[resource]
                 ? state.admin.resources[resource].list.total
-                : null
+                : null,
+        {
+            ...options,
+            relatedTo,
+            action: CRUD_GET_MATCHING,
+        }
     );
 
     const referenceState = useSelector(state =>

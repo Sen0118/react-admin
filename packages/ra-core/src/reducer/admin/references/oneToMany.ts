@@ -164,12 +164,12 @@ const removeDeletedReferences = (removedIds: Identifier[]) => (
     };
 };
 
-export const nameRelatedTo = (
+export const nameRelatedTo = <FilterType = object>(
     reference: string,
     id: Identifier,
     resource: string,
     target: string,
-    filter: object = {}
+    filter: FilterType
 ) => {
     const keys = Object.keys(filter);
     if (!keys.length) {

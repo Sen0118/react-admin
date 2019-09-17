@@ -3,9 +3,19 @@ import { useEffect } from 'react';
 import { useSafeSetState } from '../util/hooks';
 import useDataProvider from './useDataProvider';
 import useDataProviderWithDeclarativeSideEffects from './useDataProviderWithDeclarativeSideEffects';
+import {
+    Record,
+    GetListParams,
+    GetManyParams,
+    GetManyReferenceParams,
+    GetOneParams,
+    GetListResult,
+    GetManyResult,
+    GetManyReferenceResult,
+    GetOneResult,
+} from '../types';
 
 export interface Query {
-    type: string;
     resource: string;
     payload: object;
 }
@@ -15,6 +25,36 @@ export interface QueryOptions {
     action?: string;
     undoable?: false;
     withDeclarativeSideEffectsSupport?: boolean;
+}
+
+interface QueryResult {
+    error?: string;
+    loading: boolean;
+    loaded: boolean;
+}
+
+interface QueryDataProvider {
+    getList: <RecordType = Record, FilterType = any>(
+        resource: string,
+        params: GetListParams<FilterType>
+    ) => QueryResult & GetListResult<RecordType>;
+
+    getMany: <RecordType = Record>(
+        resource: string,
+        params: GetManyParams
+    ) => QueryResult & GetManyResult<RecordType>;
+
+    getManyReference: <RecordType = Record, FilterType = any>(
+        resource: string,
+        params: GetManyReferenceParams<FilterType>
+    ) => QueryResult & GetManyReferenceResult<RecordType>;
+
+    getOne: <RecordType = Record>(
+        resource: string,
+        params: GetOneParams
+    ) => QueryResult & GetOneResult<RecordType>;
+
+    [key: string]: QueryResult & any;
 }
 
 /**
@@ -27,14 +67,13 @@ export interface QueryOptions {
  * - error: { error: [error from response], loading: false, loaded: true }
  *
  * @param {Object} query
- * @param {string} query.type The verb passed to th data provider, e.g. 'GET_LIST', 'GET_ONE'
  * @param {string} query.resource A resource name, e.g. 'posts', 'comments'
  * @param {Object} query.payload The payload object, e.g; { post_id: 12 }
  * @param {Object} options
  * @param {string} options.action Redux action type
  * @param {Object} options.meta Redux action metas, including side effects to be executed upon success of failure, e.g. { onSuccess: { refresh: true } }
  *
- * @returns The current request state. Destructure as { data, total, error, loading, loaded }.
+ * @returns An object with the dataProvider query functions (getList, getMany, getManyReference, getOne). Each of them returns the current request state. Destructure as { data, total, error, loading, loaded }.
  *
  * @example
  *
@@ -80,14 +119,9 @@ export interface QueryOptions {
 const useQuery = (
     query: Query,
     options: QueryOptions = {}
-): {
-    data?: any;
-    total?: number;
-    error?: any;
-    loading: boolean;
-    loaded: boolean;
-} => {
-    const { type, resource, payload } = query;
+): QueryDataProvider => {
+    const { resource, payload } = query;
+    const [requestedFetchType, setRequestedFetchType] = useSafeSetState();
     const [state, setState] = useSafeSetState({
         data: undefined,
         error: null,
@@ -99,11 +133,20 @@ const useQuery = (
     const dataProviderWithDeclarativeSideEffects = useDataProviderWithDeclarativeSideEffects();
 
     useEffect(() => {
+        // To mimic the fetching on mount when calling one of the dataProvider like functions
+        // returned by the hook, we postpone the fetch call until this state is defined
+        if (!requestedFetchType) {
+            return;
+        }
         const dataProviderWithSideEffects = options.withDeclarativeSideEffectsSupport
             ? dataProviderWithDeclarativeSideEffects
             : dataProvider;
 
-        dataProviderWithSideEffects(type, resource, payload, options)
+        dataProviderWithSideEffects[requestedFetchType](
+            resource,
+            payload,
+            options
+        )
             .then(({ data, total }) => {
                 setState({
                     data,
@@ -120,9 +163,24 @@ const useQuery = (
                 });
             });
         // deep equality, see https://github.com/facebook/react/issues/14476#issuecomment-471199055
-    }, [JSON.stringify({ query, options }), dataProvider]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [JSON.stringify({ query, options }), dataProvider, requestedFetchType]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    return state;
+    // A fake dataProvider to make typescript happy so that it types correctly the proxy
+    const proxiedDataProvider: QueryDataProvider = {
+        getList: () => null,
+        getOne: () => null,
+        getMany: () => null,
+        getManyReference: () => null,
+    };
+
+    const proxy = new Proxy(proxiedDataProvider, {
+        get: (_, name) => {
+            setRequestedFetchType(name);
+            return state;
+        },
+    });
+
+    return proxy;
 };
 
 export default useQuery;

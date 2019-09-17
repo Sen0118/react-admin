@@ -18,6 +18,15 @@ import {
     fetchActionsWithArrayOfIdentifiedRecordsResponse,
     fetchActionsWithArrayOfRecordsResponse,
     fetchActionsWithTotalResponse,
+    GET_LIST,
+    GET_ONE,
+    GET_MANY,
+    GET_MANY_REFERENCE,
+    DELETE,
+    DELETE_MANY,
+    UPDATE,
+    UPDATE_MANY,
+    CREATE,
 } from '../dataFetchActions';
 
 function validateResponseFormat(
@@ -110,8 +119,7 @@ export function* handleFetch(
             put({ type: FETCH_START }),
         ]);
         const response = yield call(
-            dataProvider,
-            restType,
+            dataProvider[sanitizeFetchType(restType)],
             meta.resource,
             payload
         );
@@ -151,6 +159,38 @@ export function* handleFetch(
         }
     }
 }
+
+const sanitizeFetchType = fetchType => {
+    switch (fetchType) {
+        case CREATE:
+        case 'create':
+            return 'create';
+        case GET_LIST:
+        case 'getList':
+            return 'getList';
+        case GET_ONE:
+        case 'getOne':
+            return 'getOne';
+        case GET_MANY:
+        case 'getMany':
+            return 'getMany';
+        case GET_MANY_REFERENCE:
+        case 'getManyReference':
+            return 'getManyReference';
+        case DELETE:
+        case 'delete':
+            return 'delete';
+        case DELETE_MANY:
+        case 'deleteMany':
+            return 'deleteMany';
+        case UPDATE:
+        case 'update':
+            return 'update';
+        case UPDATE_MANY:
+        case 'updateMany':
+            return 'updateMany';
+    }
+};
 
 export const takeFetchAction = action => action.meta && action.meta.fetch;
 

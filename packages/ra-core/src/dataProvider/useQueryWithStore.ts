@@ -1,13 +1,24 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useSelector } from 'react-redux';
 import isEqual from 'lodash/isEqual';
 
-import { ReduxState } from '../types';
+import {
+    ReduxState,
+    Record,
+    GetListParams,
+    GetManyParams,
+    GetManyReferenceParams,
+    GetOneParams,
+    GetListResult,
+    GetManyResult,
+    GetManyReferenceResult,
+    GetOneResult,
+} from '../types';
+
 import { useSafeSetState } from '../util/hooks';
 import useDataProvider from './useDataProvider';
 
 export interface Query {
-    type: string;
     resource: string;
     payload: object;
 }
@@ -15,6 +26,46 @@ export interface Query {
 export interface QueryOptions {
     meta?: any;
     action?: string;
+}
+
+export interface QueryResult {
+    error?: string;
+    loading: boolean;
+    loaded: boolean;
+}
+
+export interface QueryDataProvider {
+    getList: <RecordType = Record, FilterType = object>(
+        resource: string,
+        params: GetListParams<FilterType>,
+        dataSelector: (state: ReduxState) => any,
+        totalSelector: (state: ReduxState) => number,
+        options?: QueryOptions
+    ) => QueryResult & GetListResult<RecordType>;
+
+    getMany: <RecordType = Record>(
+        resource: string,
+        params: GetManyParams,
+        dataSelector: (state: ReduxState) => any,
+        options?: QueryOptions
+    ) => QueryResult & GetManyResult<RecordType>;
+
+    getManyReference: <RecordType = Record, FilterType = object>(
+        resource: string,
+        params: GetManyReferenceParams<FilterType>,
+        dataSelector: (state: ReduxState) => any,
+        totalSelector: (state: ReduxState) => number,
+        options?: QueryOptions
+    ) => QueryResult & GetManyReferenceResult<RecordType>;
+
+    getOne: <RecordType = Record>(
+        resource: string,
+        params: GetOneParams,
+        dataSelector: (state: ReduxState) => any,
+        options?: QueryOptions
+    ) => QueryResult & GetOneResult<RecordType>;
+
+    [key: string]: QueryResult & any;
 }
 
 /**
@@ -45,7 +96,8 @@ const defaultDataSelector = query => (state: ReduxState) => {
         : undefined;
 };
 
-const defaultTotalSelector = () => null;
+const noopDataSelector = () => [];
+const defaultTotalSelector = () => 0;
 
 /**
  * Fetch the data provider through Redux, return the value from the store.
@@ -90,20 +142,15 @@ const defaultTotalSelector = () => null;
  *     return <div>User {data.username}</div>;
  * };
  */
-const useQueryWithStore = (
-    query: Query,
-    options: QueryOptions = { action: 'CUSTOM_QUERY' },
-    dataSelector: (state: ReduxState) => any = defaultDataSelector(query),
-    totalSelector?: (state: ReduxState) => number
-): {
-    data?: any;
-    total?: number;
-    error?: any;
-    loading: boolean;
-    loaded: boolean;
-} => {
-    const { type, resource, payload } = query;
-    const data = useSelector(dataSelector);
+const useQueryWithStore = (): QueryDataProvider => {
+    const [
+        { dataSelector, totalSelector, ...requestedFetch },
+        setRequestedFetch,
+    ] = useSafeSetState({});
+    const data = useSelector(
+        requestedFetch.type ? dataSelector : noopDataSelector
+    );
+
     const total = useSelector(totalSelector || defaultTotalSelector);
     const [state, setState] = useSafeSetState({
         data,
@@ -122,7 +169,19 @@ const useQueryWithStore = (
     }
     const dataProvider = useDataProvider();
     useEffect(() => {
-        dataProvider(type, resource, payload, options)
+        console.log({ requestedFetch });
+        // To mimic the fetching on mount when calling one of the dataProvider like functions
+        // returned by the hook, we postpone the fetch call until this state is defined
+        if (!requestedFetch.type) {
+            return;
+        }
+        console.log({ requestedFetch });
+
+        dataProvider[requestedFetch.type](
+            requestedFetch.resource,
+            requestedFetch.params,
+            requestedFetch.options
+        )
             .then(() => {
                 // We don't care about the dataProvider response here, because
                 // it was already passed to SUCCESS reducers by the dataProvider
@@ -144,9 +203,61 @@ const useQueryWithStore = (
                 });
             });
         // deep equality, see https://github.com/facebook/react/issues/14476#issuecomment-471199055
-    }, [JSON.stringify({ query, options })]); // eslint-disable-line
+    }, [JSON.stringify(requestedFetch)]); // eslint-disable-line
 
-    return state;
+    // A fake dataProvider to make typescript happy so that it types correctly the proxy
+    const proxiedDataProvider: QueryDataProvider = {
+        getList: () => null,
+        getOne: () => null,
+        getMany: () => null,
+        getManyReference: () => null,
+    };
+
+    const proxy = useMemo(
+        () =>
+            new Proxy(proxiedDataProvider, {
+                get: (_, type) => {
+                    return (resource, params, dataSelector, ...args) => {
+                        console.log(type, {
+                            resource,
+                            params,
+                            dataSelector,
+                            args,
+                        });
+                        setRequestedFetch({
+                            type,
+                            resource,
+                            params,
+                            dataSelector:
+                                dataSelector ||
+                                defaultDataSelector({
+                                    resource: requestedFetch.resource,
+                                    params: requestedFetch.params,
+                                }),
+                            totalSelector:
+                                args.length > 0 && typeof args[0] === 'function'
+                                    ? args[0]
+                                    : defaultTotalSelector,
+                            options:
+                                args[args.length] &&
+                                typeof args[args.length] !== 'function'
+                                    ? args[args.length]
+                                    : undefined,
+                        });
+                        return state;
+                    };
+                },
+            }),
+        [
+            proxiedDataProvider,
+            requestedFetch.params,
+            requestedFetch.resource,
+            setRequestedFetch,
+            state,
+        ]
+    );
+
+    return proxy;
 };
 
 export default useQueryWithStore;
